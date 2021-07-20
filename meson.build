@@ -5,10 +5,10 @@
 
 project(
   'i3',
-  'c',
+  'cpp',
   version: '4.19.2',
   default_options: [
-    'c_std=c11',
+    'cpp_std=c++11',
     'warning_level=1',  # enable all warnings (-Wall)
     # TODO(https://github.com/i3/i3/issues/4087): switch to
     # 'buildtype=debugoptimized',
@@ -19,8 +19,8 @@ project(
   meson_version: '>=0.45.0',
 )
 
-cc = meson.get_compiler('c')
-add_project_arguments(cc.get_supported_arguments(['-Wunused-value']), language: 'c')
+cc = meson.get_compiler('cpp')
+add_project_arguments(cc.get_supported_arguments(['-Wunused-value']), language: 'cpp')
 
 if meson.version().version_compare('>=0.48.0')
   # https://github.com/mesonbuild/meson/issues/2166#issuecomment-629696911
@@ -53,16 +53,16 @@ endif
 cdata.set('HAVE_STRNDUP', cc.has_function('strndup'))
 cdata.set('HAVE_MKDIRP', cc.has_function('mkdirp'))
 
-# Instead of generating config.h directly, make vcs_tag generate it so that
+# Instead of generating config.hpp directly, make vcs_tag generate it so that
 # @VCS_TAG@ is replaced.
 config_h_in = configure_file(
-  output: 'config.h.in',
+  output: 'config.hpp.in',
   configuration: cdata,
 )
 config_h = declare_dependency(
   sources: vcs_tag(
     input: config_h_in,
-    output: 'config.h',
+    output: 'config.hpp',
     fallback: meson.project_version() + '-non-git',
   )
 )
@@ -325,41 +325,41 @@ ev_dep = cc.find_library('ev')
 inc = include_directories('include')
 
 libi3srcs = [
-  'libi3/boolstr.c',
-  'libi3/create_socket.c',
-  'libi3/dpi.c',
-  'libi3/draw_util.c',
-  'libi3/fake_configure_notify.c',
-  'libi3/font.c',
-  'libi3/format_placeholders.c',
-  'libi3/get_colorpixel.c',
-  'libi3/get_config_path.c',
-  'libi3/get_exe_path.c',
-  'libi3/get_mod_mask.c',
-  'libi3/get_process_filename.c',
-  'libi3/get_visualtype.c',
-  'libi3/g_utf8_make_valid.c',
-  'libi3/ipc_connect.c',
-  'libi3/ipc_recv_message.c',
-  'libi3/ipc_send_message.c',
-  'libi3/is_debug_build.c',
-  'libi3/path_exists.c',
-  'libi3/resolve_tilde.c',
-  'libi3/root_atom_contents.c',
-  'libi3/safewrappers.c',
-  'libi3/string.c',
-  'libi3/ucs2_conversion.c',
-  'libi3/nonblock.c',
-  'libi3/screenshot_wallpaper.c',
-  'libi3/is_background_set.c',
+  'libi3/boolstr.cpp',
+  'libi3/create_socket.cpp',
+  'libi3/dpi.cpp',
+  'libi3/draw_util.cpp',
+  'libi3/fake_configure_notify.cpp',
+  'libi3/font.cpp',
+  'libi3/format_placeholders.cpp',
+  'libi3/get_colorpixel.cpp',
+  'libi3/get_config_path.cpp',
+  'libi3/get_exe_path.cpp',
+  'libi3/get_mod_mask.cpp',
+  'libi3/get_process_filename.cpp',
+  'libi3/get_visualtype.cpp',
+  'libi3/g_utf8_make_valid.cpp',
+  'libi3/ipc_connect.cpp',
+  'libi3/ipc_recv_message.cpp',
+  'libi3/ipc_send_message.cpp',
+  'libi3/is_debug_build.cpp',
+  'libi3/path_exists.cpp',
+  'libi3/resolve_tilde.cpp',
+  'libi3/root_atom_contents.cpp',
+  'libi3/safewrappers.cpp',
+  'libi3/string.cpp',
+  'libi3/ucs2_conversion.cpp',
+  'libi3/nonblock.cpp',
+  'libi3/screenshot_wallpaper.cpp',
+  'libi3/is_background_set.cpp',
 ]
 
 if not cdata.get('HAVE_STRNDUP')
-  libi3srcs += 'libi3/strndup.c'
+  libi3srcs += 'libi3/strndup.cpp'
 endif
 
 if not cdata.get('HAVE_MKDIRP')
-  libi3srcs += 'libi3/mkdirp.c'
+  libi3srcs += 'libi3/mkdirp.cpp'
 endif
 
 libi3 = static_library(
@@ -373,49 +373,49 @@ libi3 = static_library(
 )
 
 i3srcs = [
-  'src/assignments.c',
-  'src/bindings.c',
-  'src/click.c',
-  'src/commands.c',
-  'src/commands_parser.c',
-  'src/con.c',
-  'src/config.c',
-  'src/config_directives.c',
-  'src/config_parser.c',
-  'src/display_version.c',
-  'src/drag.c',
-  'src/ewmh.c',
-  'src/fake_outputs.c',
-  'src/floating.c',
-  'src/handlers.c',
-  'src/ipc.c',
-  'src/key_press.c',
-  'src/load_layout.c',
-  'src/log.c',
-  'src/main.c',
-  'src/manage.c',
-  'src/match.c',
-  'src/move.c',
-  'src/output.c',
-  'src/randr.c',
-  'src/regex.c',
-  'src/render.c',
-  'src/resize.c',
-  'src/restore_layout.c',
-  'src/scratchpad.c',
-  'src/sd-daemon.c',
-  'src/sighandler.c',
-  'src/startup.c',
-  'src/sync.c',
-  'src/tree.c',
-  'src/util.c',
-  'src/version.c',
-  'src/window.c',
-  'src/workspace.c',
-  'src/x.c',
-  'src/xcb.c',
-  'src/xcursor.c',
-  'src/xinerama.c',
+  'src/assignments.cpp',
+  'src/bindings.cpp',
+  'src/click.cpp',
+  'src/commands.cpp',
+  'src/commands_parser.cpp',
+  'src/con.cpp',
+  'src/config.cpp',
+  'src/config_directives.cpp',
+  'src/config_parser.cpp',
+  'src/display_version.cpp',
+  'src/drag.cpp',
+  'src/ewmh.cpp',
+  'src/fake_outputs.cpp',
+  'src/floating.cpp',
+  'src/handlers.cpp',
+  'src/ipc.cpp',
+  'src/key_press.cpp',
+  'src/load_layout.cpp',
+  'src/log.cpp',
+  'src/main.cpp',
+  'src/manage.cpp',
+  'src/match.cpp',
+  'src/move.cpp',
+  'src/output.cpp',
+  'src/randr.cpp',
+  'src/regex.cpp',
+  'src/render.cpp',
+  'src/resize.cpp',
+  'src/restore_layout.cpp',
+  'src/scratchpad.cpp',
+  'src/sd-daemon.cpp',
+  'src/sighandler.cpp',
+  'src/startup.cpp',
+  'src/sync.cpp',
+  'src/tree.cpp',
+  'src/util.cpp',
+  'src/version.cpp',
+  'src/window.cpp',
+  'src/workspace.cpp',
+  'src/x.cpp',
+  'src/xcb.cpp',
+  'src/xcursor.cpp',
+  'src/xinerama.cpp',
 ]
 
 # Verify the perl interpreter is present for running parser_gen,
@@ -427,9 +427,9 @@ command_parser = custom_target(
   'command_parser',
   input: 'parser-specs/commands.spec',
   output: [
-    'GENERATED_command_enums.h',
-    'GENERATED_command_tokens.h',
-    'GENERATED_command_call.h',
+    'GENERATED_command_enums.hpp',
+    'GENERATED_command_tokens.hpp',
+    'GENERATED_command_call.hpp',
   ],
   command: [perl, parser_gen, '--input=@INPUT@', '--prefix=command'],
 )
@@ -440,16 +440,16 @@ config_parser = custom_target(
   'config_parser',
   input: 'parser-specs/config.spec',
   output: [
-    'GENERATED_config_enums.h',
-    'GENERATED_config_tokens.h',
-    'GENERATED_config_call.h',
+    'GENERATED_config_enums.hpp',
+    'GENERATED_config_tokens.hpp',
+    'GENERATED_config_call.hpp',
   ],
   command: [parser_gen, '--input=@INPUT@', '--prefix=config'],
 )
 
 i3srcs += config_parser
 
-# src/log.c uses threading primitives for synchronization
+# src/log.cpp uses threading primitives for synchronization
 thread_dep = dependency('threads')
 
 common_deps = [
@@ -498,15 +498,15 @@ meson.add_install_script(
 executable(
   'i3bar',
   [
-    'i3bar/src/child.c',
-    'i3bar/src/config.c',
-    'i3bar/src/ipc.c',
-    'i3bar/src/main.c',
-    'i3bar/src/mode.c',
-    'i3bar/src/outputs.c',
-    'i3bar/src/parse_json_header.c',
-    'i3bar/src/workspaces.c',
-    'i3bar/src/xcb.c',
+    'i3bar/src/child.cpp',
+    'i3bar/src/config.cpp',
+    'i3bar/src/ipc.cpp',
+    'i3bar/src/main.cpp',
+    'i3bar/src/mode.cpp',
+    'i3bar/src/outputs.cpp',
+    'i3bar/src/parse_json_header.cpp',
+    'i3bar/src/workspaces.cpp',
+    'i3bar/src/xcb.cpp',
   ],
   install: true,
   include_directories: include_directories('include', 'i3bar/include'),
@@ -517,9 +517,9 @@ executable(
 executable(
   'i3-config-wizard',
   [
-    'i3-config-wizard/i3-config-wizard-atoms.xmacro.h',
-    'i3-config-wizard/main.c',
-    'i3-config-wizard/xcb.h',
+    'i3-config-wizard/i3-config-wizard-atoms.xmacro.hpp',
+    'i3-config-wizard/main.cpp',
+    'i3-config-wizard/xcb.hpp',
     config_parser,
   ],
   install: true,
@@ -530,7 +530,7 @@ executable(
 
 executable(
   'i3-dump-log',
-  'i3-dump-log/main.c',
+  'i3-dump-log/main.cpp',
   install: true,
   include_directories: inc,
   dependencies: common_deps,
@@ -540,10 +540,10 @@ executable(
 executable(
   'i3-input',
   [
-    'i3-input/i3-input.h',
-    'i3-input/keysym2ucs.h',
-    'i3-input/keysym2ucs.c',
-    'i3-input/main.c',
+    'i3-input/i3-input.hpp',
+    'i3-input/keysym2ucs.hpp',
+    'i3-input/keysym2ucs.cpp',
+    'i3-input/main.cpp',
   ],
   install: true,
   include_directories: inc,
@@ -553,7 +553,7 @@ executable(
 
 executable(
   'i3-msg',
-  'i3-msg/main.c',
+  'i3-msg/main.cpp',
   install: true,
   include_directories: inc,
   dependencies: common_deps,
@@ -563,8 +563,8 @@ executable(
 executable(
   'i3-nagbar',
   [
-    'i3-nagbar/i3-nagbar-atoms.xmacro.h',
-    'i3-nagbar/main.c',
+    'i3-nagbar/i3-nagbar-atoms.xmacro.hpp',
+    'i3-nagbar/main.cpp',
   ],
   install: true,
   include_directories: include_directories('include', 'i3-nagbar'),
@@ -597,7 +597,7 @@ install_subdir(
 )
 
 install_headers(
-  'include/i3/ipc.h',
+  'include/i3/ipc.hpp',
   subdir: 'i3',
 )
 
@@ -668,7 +668,7 @@ endif
 
 executable(
   'test.inject_randr15',
-  'testcases/inject_randr1.5.c',
+  'testcases/inject_randr1.5.cpp',
   include_directories: inc,
   dependencies: common_deps,
   link_with: libi3,
@@ -677,7 +677,7 @@ executable(
 executable(
   'test.commands_parser',
   [
-    'src/commands_parser.c',
+    'src/commands_parser.cpp',
     command_parser,
   ],
   include_directories: inc,
@@ -689,7 +689,7 @@ executable(
 executable(
   'test.config_parser',
   [
-    'src/config_parser.c',
+    'src/config_parser.cpp',
     config_parser,
   ],
   include_directories: inc,
