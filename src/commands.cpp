@@ -9,6 +9,9 @@
  */
 #include "all.hpp"
 #include "shmlog.hpp"
+#include "configuration.hpp"
+#include "output.hpp"
+#include "commands.hpp"
 
 #include <fcntl.h>
 #include <stdint.h>
@@ -41,37 +44,42 @@
         }                                               \
     } while (0)
 
+namespace {
 /** If an error occurred during parsing of the criteria, we want to exit instead
  * of relying on fallback behavior. See #2091. */
-#define HANDLE_INVALID_MATCH                                   \
-    do {                                                       \
-        if (current_match->error != NULL) {                    \
-            yerror("Invalid match: %s", current_match->error); \
-            return;                                            \
-        }                                                      \
-    } while (0)
+bool handle_invalid_match(Match *current_match) {
+    if (current_match->error != NULL) {                    
+        yerror("Invalid match: %s", current_match->error); 
+        return true;
+    }                                                      
+    return false;
+}
 
 /** When the command did not include match criteria (!), we use the currently
  * focused container. Do not confuse this case with a command which included
  * criteria but which did not match any windows. This macro has to be called in
  * every command.
  */
-#define HANDLE_EMPTY_MATCH                              \
-    do {                                                \
-        HANDLE_INVALID_MATCH;                           \
-                                                        \
-        if (match_is_empty(current_match)) {            \
-            while (!TAILQ_EMPTY(&owindows)) {           \
-                owindow *ow = TAILQ_FIRST(&owindows);   \
-                TAILQ_REMOVE(&owindows, ow, owindows);  \
-                free(ow);                               \
-            }                                           \
-            owindow *ow = smalloc(sizeof(owindow));     \
-            ow->con = focused;                          \
-            TAILQ_INIT(&owindows);                      \
-            TAILQ_INSERT_TAIL(&owindows, ow, owindows); \
-        }                                               \
-    } while (0)
+bool handle_empty_match(Match *current_match) {
+    if(handle_invalid_match(current_match->error)) {
+        return true;
+    };
+
+    if (match_is_empty(current_match)) {           
+        while (!TAILQ_EMPTY(&owindows)) {          
+            owindow *ow = TAILQ_FIRST(&owindows);  
+            TAILQ_REMOVE(&owindows, ow, owindows); 
+            free(ow);                              
+        }                                          
+        owindow *ow = smalloc(sizeof(owindow));    
+        ow->con = focused;                         
+        TAILQ_INIT(&owindows);                     
+        TAILQ_INSERT_TAIL(&owindows, ow, owindows);
+    }                                              
+    return false;
+}
+}
+
 
 /*
  * Checks whether we switched to a new workspace and returns false in that case,
@@ -141,7 +149,7 @@ static owindows_head owindows;
  * commands.c for matching target windows of a command.
  *
  */
-void cmd_criteria_init(I3_CMD) {
+void cmd_criteria_init(Match *current_match, CommandResultIR *cmd_output) {
     Con *con;
     owindow *ow;
 
@@ -167,7 +175,7 @@ void cmd_criteria_init(I3_CMD) {
  * so we filter the list of owindows.
  *
  */
-void cmd_criteria_match_windows(I3_CMD) {
+void cmd_criteria_match_windows(Match *current_match, CommandResultIR *cmd_output) {
     owindow *next, *current;
 
     DLOG("match specification finished, matching...\n");
@@ -250,7 +258,7 @@ void cmd_criteria_match_windows(I3_CMD) {
  * specification.
  *
  */
-void cmd_criteria_add(I3_CMD, const char *ctype, const char *cvalue) {
+void cmd_criteria_add(Match *current_match, CommandResultIR *cmd_output, const char *ctype, const char *cvalue) {
     match_parse_property(current_match, ctype, cvalue);
 }
 
@@ -264,7 +272,7 @@ static void move_matches_to_workspace(Con *ws) {
 
 #define CHECK_MOVE_CON_TO_WORKSPACE                                                          \
     do {                                                                                     \
-        HANDLE_EMPTY_MATCH;                                                                  \
+        if(handle_empty_match(current_match)) { return; }                                                                  \
         if (TAILQ_EMPTY(&owindows)) {                                                        \
             yerror("Nothing to move: specified criteria don't match any window");            \
             return;                                                                          \
@@ -274,7 +282,7 @@ static void move_matches_to_workspace(Con *ws) {
             while (current) {                                                                \
                 owindow *next = TAILQ_NEXT(current, owindows);                               \
                                                                                              \
-                if (current->con->type == CT_WORKSPACE && !con_has_children(current->con)) { \
+                if (current->con->type == Con::type::CT_WORKSPACE && !con_has_children(current->con)) { \
                     TAILQ_REMOVE(&owindows, current, owindows);                              \
                 } else {                                                                     \
                     found = true;                                                            \
@@ -294,7 +302,7 @@ static void move_matches_to_workspace(Con *ws) {
  * next|prev|next_on_output|prev_on_output|current'.
  *
  */
-void cmd_move_con_to_workspace(I3_CMD, const char *which) {
+void cmd_move_con_to_workspace(Match *current_match, CommandResultIR *cmd_output, const char *which) {
     DLOG("which=%s\n", which);
 
     CHECK_MOVE_CON_TO_WORKSPACE;
@@ -327,14 +335,14 @@ void cmd_move_con_to_workspace(I3_CMD, const char *which) {
  * Implementation of 'move [window|container] [to] workspace back_and_forth'.
  *
  */
-void cmd_move_con_to_workspace_back_and_forth(I3_CMD) {
+void cmd_move_con_to_workspace_back_and_forth(Match *current_match, CommandResultIR *cmd_output) {
     Con *ws = workspace_back_and_forth_get();
     if (ws == NULL) {
         yerror("No workspace was previously active.");
         return;
     }
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     move_matches_to_workspace(ws);
 
@@ -347,7 +355,7 @@ void cmd_move_con_to_workspace_back_and_forth(I3_CMD) {
  * Implementation of 'move [--no-auto-back-and-forth] [window|container] [to] workspace <name>'.
  *
  */
-void cmd_move_con_to_workspace_name(I3_CMD, const char *name, const char *no_auto_back_and_forth) {
+void cmd_move_con_to_workspace_name(Match *current_match, CommandResultIR *cmd_output, const char *name, const char *no_auto_back_and_forth) {
     if (strncasecmp(name, "__", strlen("__")) == 0) {
         yerror("You cannot move containers to i3-internal workspaces (\"%s\").", name);
         return;
@@ -374,7 +382,7 @@ void cmd_move_con_to_workspace_name(I3_CMD, const char *name, const char *no_aut
  * Implementation of 'move [--no-auto-back-and-forth] [window|container] [to] workspace number <name>'.
  *
  */
-void cmd_move_con_to_workspace_number(I3_CMD, const char *which, const char *no_auto_back_and_forth) {
+void cmd_move_con_to_workspace_number(Match *current_match, CommandResultIR *cmd_output, const char *which, const char *no_auto_back_and_forth) {
     CHECK_MOVE_CON_TO_WORKSPACE;
 
     LOG("should move window to workspace %s\n", which);
@@ -421,7 +429,7 @@ static direction_t parse_direction(const char *str) {
     }
 }
 
-static void cmd_resize_floating(I3_CMD, const char *direction_str, Con *floating_con, int px) {
+static void cmd_resize_floating(Match *current_match, CommandResultIR *cmd_output, const char *direction_str, Con *floating_con, int px) {
     Rect old_rect = floating_con->rect;
     Con *focused_con = con_descend_focused(floating_con);
 
@@ -480,7 +488,8 @@ static void cmd_resize_floating(I3_CMD, const char *direction_str, Con *floating
     }
 }
 
-static bool cmd_resize_tiling_direction(I3_CMD, Con *current, const char *direction, int px, int ppt) {
+namespace {
+bool cmd_resize_tiling_direction(Match *current_match, CommandResultIR *cmd_output, Con *current, const char *direction, int px, int ppt) {
     Con *second = NULL;
     Con *first = current;
     direction_t search_direction = parse_direction(direction);
@@ -492,17 +501,19 @@ static bool cmd_resize_tiling_direction(I3_CMD, Con *current, const char *direct
     }
 
     if (ppt) {
-        /* For backwards compatibility, 'X px or Y ppt' means that ppt is
-         * preferred. */
+        For backwards compatibility, 'X px or Y ppt' means that ppt is
+        preferred. 
         px = 0;
     }
     return resize_neighboring_cons(first, second, px, ppt);
 }
+}
 
-static bool cmd_resize_tiling_width_height(I3_CMD, Con *current, const char *direction, int px, double ppt) {
+namespace {
+bool cmd_resize_tiling_width_height(Match *current_match, CommandResultIR *cmd_output, Con *current, const char *direction, int px, double ppt) {
     LOG("width/height resize\n");
 
-    /* get the appropriate current container (skip stacked/tabbed cons) */
+    // get the appropriate current container (skip stacked/tabbed cons) 
     Con *dummy = NULL;
     direction_t search_direction = (strcmp(direction, "width") == 0 ? D_LEFT : D_DOWN);
     bool search_result = resize_find_tiling_participants(&current, &dummy, search_direction, true);
@@ -511,13 +522,13 @@ static bool cmd_resize_tiling_width_height(I3_CMD, Con *current, const char *dir
         return false;
     }
 
-    /* get the default percentage */
+    // get the default percentage 
     int children = con_num_children(current->parent);
     LOG("ins. %d children\n", children);
     double percentage = 1.0 / children;
     LOG("default percentage = %f\n", percentage);
 
-    /* Ensure all the other children have a percentage set. */
+    // Ensure all the other children have a percentage set. 
     Con *child;
     TAILQ_FOREACH (child, &(current->parent->nodes_head), nodes) {
         LOG("child->percent = %f (child %p)\n", child->percent, child);
@@ -530,7 +541,7 @@ static bool cmd_resize_tiling_width_height(I3_CMD, Con *current, const char *dir
     if (ppt != 0.0) {
         new_current_percent = current->percent + ppt;
     } else {
-        /* Convert px change to change in percentages */
+        // Convert px change to change in percentages 
         ppt = (double)px / (double)con_rect_size_in_orientation(current->parent);
         new_current_percent = current->percent + ppt;
     }
@@ -542,7 +553,7 @@ static bool cmd_resize_tiling_width_height(I3_CMD, Con *current, const char *dir
 
     LOG("new_current_percent = %f\n", new_current_percent);
     LOG("subtract_percent = %f\n", subtract_percent);
-    /* Ensure that the new percentages are positive. */
+    // Ensure that the new percentages are positive. 
     if (subtract_percent >= 0.0) {
         TAILQ_FOREACH (child, &(current->parent->nodes_head), nodes) {
             if (child == current) {
@@ -567,19 +578,20 @@ static bool cmd_resize_tiling_width_height(I3_CMD, Con *current, const char *dir
 
     return true;
 }
+}
 
 /*
  * Implementation of 'resize grow|shrink <direction> [<px> px] [or <ppt> ppt]'.
  *
  */
-void cmd_resize(I3_CMD, const char *way, const char *direction, long resize_px, long resize_ppt) {
+void cmd_resize(Match *current_match, CommandResultIR *cmd_output, const char *way, const char *direction, long resize_px, long resize_ppt) {
     DLOG("resizing in way %s, direction %s, px %ld or ppt %ld\n", way, direction, resize_px, resize_ppt);
     if (strcmp(way, "shrink") == 0) {
         resize_px *= -1;
         resize_ppt *= -1;
     }
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current;
     TAILQ_FOREACH (current, &owindows, owindows) {
@@ -618,7 +630,8 @@ void cmd_resize(I3_CMD, const char *way, const char *direction, long resize_px, 
     ysuccess(true);
 }
 
-static bool resize_set_tiling(I3_CMD, Con *target, orientation_t resize_orientation, bool is_ppt, long target_size) {
+namespace {
+bool resize_set_tiling(Match *current_match, CommandResultIR *cmd_output, Con *target, orientation_t resize_orientation, bool is_ppt, long target_size) {
     direction_t search_direction;
     char *mode;
     if (resize_orientation == HORIZ) {
@@ -629,11 +642,11 @@ static bool resize_set_tiling(I3_CMD, Con *target, orientation_t resize_orientat
         mode = "height";
     }
 
-    /* Get the appropriate current container (skip stacked/tabbed cons) */
+    // Get the appropriate current container (skip stacked/tabbed cons) 
     Con *dummy;
     resize_find_tiling_participants(&target, &dummy, search_direction, true);
 
-    /* Calculate new size for the target container */
+    // Calculate new size for the target container 
     double ppt = 0.0;
     int px = 0;
     if (is_ppt) {
@@ -642,23 +655,24 @@ static bool resize_set_tiling(I3_CMD, Con *target, orientation_t resize_orientat
         px = target_size - (resize_orientation == HORIZ ? target->rect.width : target->rect.height);
     }
 
-    /* Perform resizing and report failure if not possible */
+    // Perform resizing and report failure if not possible 
     return cmd_resize_tiling_width_height(current_match, cmd_output,
                                           target, mode, px, ppt);
+}
 }
 
 /*
  * Implementation of 'resize set <width> [px | ppt] <height> [px | ppt]'.
  *
  */
-void cmd_resize_set(I3_CMD, long cwidth, const char *mode_width, long cheight, const char *mode_height) {
+void cmd_resize_set(Match *current_match, CommandResultIR *cmd_output, long cwidth, const char *mode_width, long cheight, const char *mode_height) {
     DLOG("resizing to %ld %s x %ld %s\n", cwidth, mode_width, cheight, mode_height);
     if (cwidth < 0 || cheight < 0) {
         yerror("Dimensions cannot be negative.");
         return;
     }
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current;
     bool success = true;
@@ -700,7 +714,8 @@ void cmd_resize_set(I3_CMD, long cwidth, const char *mode_width, long cheight, c
     ysuccess(success);
 }
 
-static int border_width_from_style(border_style_t border_style, long border_width, Con *con) {
+namespace {
+int border_width_from_style(border_style_t border_style, long border_width, Con *con) {
     if (border_style == BS_NONE) {
         return 0;
     }
@@ -709,26 +724,27 @@ static int border_width_from_style(border_style_t border_style, long border_widt
     }
 
     const bool is_floating = con_inside_floating(con) != NULL;
-    /* Load the configured defaults. */
+    // Load the configured defaults. 
     if (is_floating && border_style == config.default_floating_border) {
         return config.default_floating_border_width;
     } else if (!is_floating && border_style == config.default_border) {
         return config.default_border_width;
     } else {
-        /* Use some hardcoded values. */
+        // Use some hardcoded values. 
         return logical_px(border_style == BS_NORMAL ? 2 : 1);
     }
+}
 }
 
 /*
  * Implementation of 'border normal|pixel [<n>]', 'border none|1pixel|toggle'.
  *
  */
-void cmd_border(I3_CMD, const char *border_style_str, long border_width) {
+void cmd_border(Match *current_match, CommandResultIR *cmd_output, const char *border_style_str, long border_width) {
     DLOG("border style should be changed to %s with border width %ld\n", border_style_str, border_width);
     owindow *current;
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     TAILQ_FOREACH (current, &owindows, owindows) {
         DLOG("matching: %p / %s\n", current->con, current->con->name);
@@ -759,7 +775,7 @@ void cmd_border(I3_CMD, const char *border_style_str, long border_width) {
  * Implementation of 'nop <comment>'.
  *
  */
-void cmd_nop(I3_CMD, const char *comment) {
+void cmd_nop(Match *current_match, CommandResultIR *cmd_output, const char *comment) {
     LOG("-------------------------------------------------\n");
     LOG("  NOP: %.4000s\n", comment);
     LOG("-------------------------------------------------\n");
@@ -770,7 +786,7 @@ void cmd_nop(I3_CMD, const char *comment) {
  * Implementation of 'append_layout <path>'.
  *
  */
-void cmd_append_layout(I3_CMD, const char *cpath) {
+void cmd_append_layout(Match *current_match, CommandResultIR *cmd_output, const char *cpath) {
     LOG("Appending layout \"%s\"\n", cpath);
 
     /* Make sure we allow paths like '~/.i3/layout.json' */
@@ -806,7 +822,7 @@ void cmd_append_layout(I3_CMD, const char *cpath) {
          * container must not have any children (by definition).
          * Note that we explicitly check for workspaces, since they are okay for
          * this purpose, but con_accepts_window() returns false for workspaces. */
-        while (parent->type != CT_WORKSPACE && !con_accepts_window(parent))
+        while (parent->type != Con::type::CT_WORKSPACE && !con_accepts_window(parent))
             parent = parent->parent;
     }
     DLOG("Appending to parent=%p instead of focused=%p\n", parent, focused);
@@ -846,7 +862,7 @@ out:
  * Implementation of 'workspace next|prev|next_on_output|prev_on_output'.
  *
  */
-void cmd_workspace(I3_CMD, const char *which) {
+void cmd_workspace(Match *current_match, CommandResultIR *cmd_output, const char *which) {
     Con *ws;
 
     DLOG("which=%s\n", which);
@@ -880,7 +896,7 @@ void cmd_workspace(I3_CMD, const char *which) {
  * Implementation of 'workspace [--no-auto-back-and-forth] number <name>'
  *
  */
-void cmd_workspace_number(I3_CMD, const char *which, const char *_no_auto_back_and_forth) {
+void cmd_workspace_number(Match *current_match, CommandResultIR *cmd_output, const char *which, const char *_no_auto_back_and_forth) {
     const bool no_auto_back_and_forth = (_no_auto_back_and_forth != NULL);
 
     if (con_get_fullscreen_con(croot, CF_GLOBAL)) {
@@ -917,7 +933,7 @@ void cmd_workspace_number(I3_CMD, const char *which, const char *_no_auto_back_a
  * Implementation of 'workspace back_and_forth'.
  *
  */
-void cmd_workspace_back_and_forth(I3_CMD) {
+void cmd_workspace_back_and_forth(Match *current_match, CommandResultIR *cmd_output) {
     if (con_get_fullscreen_con(croot, CF_GLOBAL)) {
         yerror("Cannot switch workspace while in global fullscreen");
         return;
@@ -934,7 +950,7 @@ void cmd_workspace_back_and_forth(I3_CMD) {
  * Implementation of 'workspace [--no-auto-back-and-forth] <name>'
  *
  */
-void cmd_workspace_name(I3_CMD, const char *name, const char *_no_auto_back_and_forth) {
+void cmd_workspace_name(Match *current_match, CommandResultIR *cmd_output, const char *name, const char *_no_auto_back_and_forth) {
     const bool no_auto_back_and_forth = (_no_auto_back_and_forth != NULL);
 
     if (strncasecmp(name, "__", strlen("__")) == 0) {
@@ -963,8 +979,8 @@ void cmd_workspace_name(I3_CMD, const char *name, const char *_no_auto_back_and_
  * Implementation of 'mark [--add|--replace] [--toggle] <mark>'
  *
  */
-void cmd_mark(I3_CMD, const char *mark, const char *mode, const char *toggle) {
-    HANDLE_EMPTY_MATCH;
+void cmd_mark(Match *current_match, CommandResultIR *cmd_output, const char *mark, const char *mode, const char *toggle) {
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current = TAILQ_FIRST(&owindows);
     if (current == NULL) {
@@ -996,7 +1012,7 @@ void cmd_mark(I3_CMD, const char *mark, const char *mode, const char *toggle) {
  * Implementation of 'unmark [mark]'
  *
  */
-void cmd_unmark(I3_CMD, const char *mark) {
+void cmd_unmark(Match *current_match, CommandResultIR *cmd_output, const char *mark) {
     if (match_is_empty(current_match)) {
         con_unmark(NULL, mark);
     } else {
@@ -1015,7 +1031,7 @@ void cmd_unmark(I3_CMD, const char *mark) {
  * Implementation of 'mode <string>'.
  *
  */
-void cmd_mode(I3_CMD, const char *mode) {
+void cmd_mode(Match *current_match, CommandResultIR *cmd_output, const char *mode) {
     DLOG("mode=%s\n", mode);
     switch_mode(mode);
 
@@ -1027,7 +1043,7 @@ void cmd_mode(I3_CMD, const char *mode) {
  * Implementation of 'move [window|container|workspace] [to] output <strings>'.
  *
  */
-void cmd_move_con_to_output(I3_CMD, const char *name, bool move_workspace) {
+void cmd_move_con_to_output(Match *current_match, CommandResultIR *cmd_output, const char *name, bool move_workspace) {
     /* Initialize a data structure that is used to save multiple user-specified
      * output names since this function is called multiple types for each
      * command call. */
@@ -1050,13 +1066,13 @@ void cmd_move_con_to_output(I3_CMD, const char *name, bool move_workspace) {
             return;
         }
 
-        user_output_name *co = scalloc(sizeof(user_output_name), 1);
+        auto *co = create_struct<user_output_name>();
         co->name = sstrdup(name);
         TAILQ_INSERT_TAIL(&user_output_names, co, user_output_names);
         return;
     }
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     if (TAILQ_EMPTY(&user_output_names)) {
         yerror("At least one output must be specified");
@@ -1137,10 +1153,10 @@ void cmd_move_con_to_output(I3_CMD, const char *name, bool move_workspace) {
  * Implementation of 'move [container|window] [to] mark <str>'.
  *
  */
-void cmd_move_con_to_mark(I3_CMD, const char *mark) {
+void cmd_move_con_to_mark(Match *current_match, CommandResultIR *cmd_output, const char *mark) {
     DLOG("moving window to mark \"%s\"\n", mark);
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     bool result = true;
     owindow *current;
@@ -1157,12 +1173,12 @@ void cmd_move_con_to_mark(I3_CMD, const char *mark) {
  * Implementation of 'floating enable|disable|toggle'
  *
  */
-void cmd_floating(I3_CMD, const char *floating_mode) {
+void cmd_floating(Match *current_match, CommandResultIR *cmd_output, const char *floating_mode) {
     owindow *current;
 
     DLOG("floating_mode=%s\n", floating_mode);
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     TAILQ_FOREACH (current, &owindows, owindows) {
         DLOG("matching: %p / %s\n", current->con, current->con->name);
@@ -1188,8 +1204,8 @@ void cmd_floating(I3_CMD, const char *floating_mode) {
  * Implementation of 'split v|h|t|vertical|horizontal|toggle'.
  *
  */
-void cmd_split(I3_CMD, const char *direction) {
-    HANDLE_EMPTY_MATCH;
+void cmd_split(Match *current_match, CommandResultIR *cmd_output, const char *direction) {
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current;
     LOG("splitting in direction %c\n", direction[0]);
@@ -1202,7 +1218,7 @@ void cmd_split(I3_CMD, const char *direction) {
         DLOG("matching: %p / %s\n", current->con, current->con->name);
         if (direction[0] == 't') {
             layout_t current_layout;
-            if (current->con->type == CT_WORKSPACE) {
+            if (current->con->type == Con::type::CT_WORKSPACE) {
                 current_layout = current->con->layout;
             } else {
                 current_layout = current->con->parent->layout;
@@ -1227,23 +1243,23 @@ void cmd_split(I3_CMD, const char *direction) {
  * Implementation of 'kill [window|client]'.
  *
  */
-void cmd_kill(I3_CMD, const char *kill_mode_str) {
+void cmd_kill(Match *current_match, CommandResultIR *cmd_output, const char *kill_mode_str) {
     if (kill_mode_str == NULL)
         kill_mode_str = "window";
 
     DLOG("kill_mode=%s\n", kill_mode_str);
 
-    int kill_mode;
+    kill_window kill_mode;
     if (strcmp(kill_mode_str, "window") == 0)
-        kill_mode = KILL_WINDOW;
+        kill_mode = kill_window::KILL_WINDOW;
     else if (strcmp(kill_mode_str, "client") == 0)
-        kill_mode = KILL_CLIENT;
+        kill_mode = kill_window::KILL_CLIENT;
     else {
         yerror("BUG: called with kill_mode=%s", kill_mode_str);
         return;
     }
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current;
     TAILQ_FOREACH (current, &owindows, owindows) {
@@ -1259,10 +1275,10 @@ void cmd_kill(I3_CMD, const char *kill_mode_str) {
  * Implementation of 'exec [--no-startup-id] <command>'.
  *
  */
-void cmd_exec(I3_CMD, const char *nosn, const char *command) {
+void cmd_exec(Match *current_match, CommandResultIR *cmd_output, const char *nosn, const char *command) {
     bool no_startup_id = (nosn != NULL);
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     int count = 0;
     owindow *current;
@@ -1303,8 +1319,8 @@ void cmd_exec(I3_CMD, const char *nosn, const char *command) {
  * Implementation of 'focus left|right|up|down|next|prev'.
  *
  */
-void cmd_focus_direction(I3_CMD, const char *direction_str) {
-    HANDLE_EMPTY_MATCH;
+void cmd_focus_direction(Match *current_match, CommandResultIR *cmd_output, const char *direction_str) {
+    if(handle_empty_match(current_match)) { return; }
     CMD_FOCUS_WARN_CHILDREN;
 
     direction_t direction;
@@ -1341,8 +1357,8 @@ void cmd_focus_direction(I3_CMD, const char *direction_str) {
  * Implementation of 'focus next|prev sibling'
  *
  */
-void cmd_focus_sibling(I3_CMD, const char *direction_str) {
-    HANDLE_EMPTY_MATCH;
+void cmd_focus_sibling(Match *current_match, CommandResultIR *cmd_output, const char *direction_str) {
+    if(handle_empty_match(current_match)) { return; }
     CMD_FOCUS_WARN_CHILDREN;
 
     const position_t direction = (STARTS_WITH(direction_str, "prev")) ? BEFORE : AFTER;
@@ -1354,7 +1370,7 @@ void cmd_focus_sibling(I3_CMD, const char *direction_str) {
         }
         Con *next = get_tree_next_sibling(current->con, direction);
         if (next) {
-            if (next->type == CT_WORKSPACE) {
+            if (next->type == Con::type::CT_WORKSPACE) {
                 /* On the workspace level, we need to make sure that the
                  * workspace change happens properly. However, workspace_show
                  * descends focus so we also have to put focus on the workspace
@@ -1376,7 +1392,7 @@ void cmd_focus_sibling(I3_CMD, const char *direction_str) {
  * Implementation of 'focus tiling|floating|mode_toggle'.
  *
  */
-void cmd_focus_window_mode(I3_CMD, const char *window_mode) {
+void cmd_focus_window_mode(Match *current_match, CommandResultIR *cmd_output, const char *window_mode) {
     DLOG("window_mode = %s\n", window_mode);
 
     bool to_floating = false;
@@ -1392,8 +1408,8 @@ void cmd_focus_window_mode(I3_CMD, const char *window_mode) {
     Con *current;
     bool success = false;
     TAILQ_FOREACH (current, &(ws->focus_head), focused) {
-        if ((to_floating && current->type != CT_FLOATING_CON) ||
-            (!to_floating && current->type == CT_FLOATING_CON))
+        if ((to_floating && current->type != Con::type::CT_FLOATING_CON) ||
+            (!to_floating && current->type == Con::type::CT_FLOATING_CON))
             continue;
 
         con_activate_unblock(con_descend_focused(current));
@@ -1413,7 +1429,7 @@ void cmd_focus_window_mode(I3_CMD, const char *window_mode) {
  * Implementation of 'focus parent|child'.
  *
  */
-void cmd_focus_level(I3_CMD, const char *level) {
+void cmd_focus_level(Match *current_match, CommandResultIR *cmd_output, const char *level) {
     DLOG("level = %s\n", level);
     bool success = false;
 
@@ -1441,7 +1457,7 @@ void cmd_focus_level(I3_CMD, const char *level) {
  * Implementation of 'focus'.
  *
  */
-void cmd_focus(I3_CMD) {
+void cmd_focus(Match *current_match, CommandResultIR *cmd_output) {
     DLOG("current_match = %p\n", current_match);
 
     if (match_is_empty(current_match)) {
@@ -1488,12 +1504,12 @@ void cmd_focus(I3_CMD) {
  *                   'fullscreen disable'
  *
  */
-void cmd_fullscreen(I3_CMD, const char *action, const char *fullscreen_mode) {
+void cmd_fullscreen(Match *current_match, CommandResultIR *cmd_output, const char *action, const char *fullscreen_mode) {
     fullscreen_mode_t mode = strcmp(fullscreen_mode, "global") == 0 ? CF_GLOBAL : CF_OUTPUT;
     DLOG("%s fullscreen, mode = %s\n", action, fullscreen_mode);
     owindow *current;
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     TAILQ_FOREACH (current, &owindows, owindows) {
         DLOG("matching: %p / %s\n", current->con, current->con->name);
@@ -1515,9 +1531,9 @@ void cmd_fullscreen(I3_CMD, const char *action, const char *fullscreen_mode) {
  * Implementation of 'sticky enable|disable|toggle'.
  *
  */
-void cmd_sticky(I3_CMD, const char *action) {
+void cmd_sticky(Match *current_match, CommandResultIR *cmd_output, const char *action) {
     DLOG("%s sticky on window\n", action);
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current;
     TAILQ_FOREACH (current, &owindows, owindows) {
@@ -1553,9 +1569,9 @@ void cmd_sticky(I3_CMD, const char *action) {
  * Implementation of 'move <direction> [<amount> [px|ppt]]'.
  *
  */
-void cmd_move_direction(I3_CMD, const char *direction_str, long amount, const char *mode) {
+void cmd_move_direction(Match *current_match, CommandResultIR *cmd_output, const char *direction_str, long amount, const char *mode) {
     owindow *current;
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     Con *initially_focused = focused;
     direction_t direction = parse_direction(direction_str);
@@ -1605,8 +1621,8 @@ void cmd_move_direction(I3_CMD, const char *direction_str, long amount, const ch
  * Implementation of 'layout default|stacked|stacking|tabbed|splitv|splith'.
  *
  */
-void cmd_layout(I3_CMD, const char *layout_str) {
-    HANDLE_EMPTY_MATCH;
+void cmd_layout(Match *current_match, CommandResultIR *cmd_output, const char *layout_str) {
+    if(handle_empty_match(current_match)) { return; }
 
     layout_t layout;
     if (!layout_from_name(layout_str, &layout)) {
@@ -1636,7 +1652,7 @@ void cmd_layout(I3_CMD, const char *layout_str) {
  * Implementation of 'layout toggle [all|split]'.
  *
  */
-void cmd_layout_toggle(I3_CMD, const char *toggle_mode) {
+void cmd_layout_toggle(Match *current_match, CommandResultIR *cmd_output, const char *toggle_mode) {
     owindow *current;
 
     if (toggle_mode == NULL)
@@ -1663,7 +1679,7 @@ void cmd_layout_toggle(I3_CMD, const char *toggle_mode) {
  * Implementation of 'exit'.
  *
  */
-void cmd_exit(I3_CMD) {
+void cmd_exit(Match *current_match, CommandResultIR *cmd_output) {
     LOG("Exiting due to user command.\n");
     exit(EXIT_SUCCESS);
 
@@ -1674,7 +1690,7 @@ void cmd_exit(I3_CMD) {
  * Implementation of 'reload'.
  *
  */
-void cmd_reload(I3_CMD) {
+void cmd_reload(Match *current_match, CommandResultIR *cmd_output) {
     LOG("reloading\n");
 
     kill_nagbar(config_error_nagbar_pid, false);
@@ -1704,7 +1720,7 @@ void cmd_reload(I3_CMD) {
  * Implementation of 'restart'.
  *
  */
-void cmd_restart(I3_CMD) {
+void cmd_restart(Match *current_match, CommandResultIR *cmd_output) {
     LOG("restarting i3\n");
     int exempt_fd = -1;
     if (cmd_output->client != NULL) {
@@ -1736,7 +1752,7 @@ void cmd_restart(I3_CMD) {
  * Implementation of 'open'.
  *
  */
-void cmd_open(I3_CMD) {
+void cmd_open(Match *current_match, CommandResultIR *cmd_output) {
     LOG("opening new container\n");
     Con *con = tree_open_con(NULL, NULL);
     con->layout = L_SPLITH;
@@ -1756,8 +1772,8 @@ void cmd_open(I3_CMD) {
  * Implementation of 'focus output <output>'.
  *
  */
-void cmd_focus_output(I3_CMD, const char *name) {
-    HANDLE_EMPTY_MATCH;
+void cmd_focus_output(Match *current_match, CommandResultIR *cmd_output, const char *name) {
+    if(handle_empty_match(current_match)) { return; }
 
     if (TAILQ_EMPTY(&owindows)) {
         ysuccess(true);
@@ -1773,7 +1789,7 @@ void cmd_focus_output(I3_CMD, const char *name) {
     }
 
     /* get visible workspace on output */
-    Con *ws = NULL;
+    Con *ws = nullptr;
     GREP_FIRST(ws, output_get_content(output->con), workspace_is_visible(child));
     if (!ws) {
         yerror("BUG: No workspace found on output.");
@@ -1790,11 +1806,11 @@ void cmd_focus_output(I3_CMD, const char *name) {
  * Implementation of 'move [window|container] [to] [absolute] position [<pos_x> [px|ppt] <pos_y> [px|ppt]]
  *
  */
-void cmd_move_window_to_position(I3_CMD, long x, const char *mode_x, long y, const char *mode_y) {
+void cmd_move_window_to_position(Match *current_match, CommandResultIR *cmd_output, long x, const char *mode_x, long y, const char *mode_y) {
     bool has_error = false;
 
     owindow *current;
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     TAILQ_FOREACH (current, &owindows, owindows) {
         if (!con_is_floating(current->con)) {
@@ -1829,9 +1845,9 @@ void cmd_move_window_to_position(I3_CMD, long x, const char *mode_x, long y, con
  * Implementation of 'move [window|container] [to] [absolute] position center
  *
  */
-void cmd_move_window_to_center(I3_CMD, const char *method) {
+void cmd_move_window_to_center(Match *current_match, CommandResultIR *cmd_output, const char *method) {
     bool has_error = false;
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current;
     TAILQ_FOREACH (current, &owindows, owindows) {
@@ -1873,8 +1889,8 @@ void cmd_move_window_to_center(I3_CMD, const char *method) {
  * Implementation of 'move [window|container] [to] position mouse'
  *
  */
-void cmd_move_window_to_mouse(I3_CMD) {
-    HANDLE_EMPTY_MATCH;
+void cmd_move_window_to_mouse(Match *current_match, CommandResultIR *cmd_output) {
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current;
     TAILQ_FOREACH (current, &owindows, owindows) {
@@ -1897,11 +1913,11 @@ void cmd_move_window_to_mouse(I3_CMD) {
  * Implementation of 'move scratchpad'.
  *
  */
-void cmd_move_scratchpad(I3_CMD) {
+void cmd_move_scratchpad(Match *current_match, CommandResultIR *cmd_output) {
     DLOG("should move window to scratchpad\n");
     owindow *current;
 
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     TAILQ_FOREACH (current, &owindows, owindows) {
         DLOG("matching: %p / %s\n", current->con, current->con->name);
@@ -1917,7 +1933,7 @@ void cmd_move_scratchpad(I3_CMD) {
  * Implementation of 'scratchpad show'.
  *
  */
-void cmd_scratchpad_show(I3_CMD) {
+void cmd_scratchpad_show(Match *current_match, CommandResultIR *cmd_output) {
     DLOG("should show scratchpad window\n");
     owindow *current;
     bool result = false;
@@ -1940,8 +1956,8 @@ void cmd_scratchpad_show(I3_CMD) {
  * Implementation of 'swap [container] [with] id|con_id|mark <arg>'.
  *
  */
-void cmd_swap(I3_CMD, const char *mode, const char *arg) {
-    HANDLE_EMPTY_MATCH;
+void cmd_swap(Match *current_match, CommandResultIR *cmd_output, const char *mode, const char *arg) {
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *match = TAILQ_FIRST(&owindows);
     if (match == NULL) {
@@ -1998,9 +2014,9 @@ void cmd_swap(I3_CMD, const char *mode, const char *arg) {
  * Implementation of 'title_format <format>'
  *
  */
-void cmd_title_format(I3_CMD, const char *format) {
+void cmd_title_format(Match *current_match, CommandResultIR *cmd_output, const char *format) {
     DLOG("setting title_format to \"%s\"\n", format);
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) { return; }
 
     owindow *current;
     TAILQ_FOREACH (current, &owindows, owindows) {
@@ -2041,12 +2057,14 @@ void cmd_title_format(I3_CMD, const char *format) {
  * Implementation of 'title_window_icon <yes|no>' and 'title_window_icon padding <px>'
  *
  */
-void cmd_title_window_icon(I3_CMD, const char *enable, int padding) {
+void cmd_title_window_icon(Match *current_match, CommandResultIR *cmd_output, const char *enable, int padding) {
     if (enable != NULL && !boolstr(enable)) {
         padding = -1;
     }
     DLOG("setting window_icon=%d\n", padding);
-    HANDLE_EMPTY_MATCH;
+    if(handle_empty_match(current_match)) {
+        return;
+    };
 
     owindow *current;
     TAILQ_FOREACH (current, &owindows, owindows) {
@@ -2070,7 +2088,7 @@ void cmd_title_window_icon(I3_CMD, const char *enable, int padding) {
  * Implementation of 'rename workspace [<name>] to <name>'
  *
  */
-void cmd_rename_workspace(I3_CMD, const char *old_name, const char *new_name) {
+void cmd_rename_workspace(Match *current_match, CommandResultIR *cmd_output, const char *old_name, const char *new_name) {
     if (strncasecmp(new_name, "__", strlen("__")) == 0) {
         yerror("Cannot rename workspace to \"%s\": names starting with __ are i3-internal.", new_name);
         return;
@@ -2114,7 +2132,7 @@ void cmd_rename_workspace(I3_CMD, const char *old_name, const char *new_name) {
 
     /* By re-attaching, the sort order will be correct afterwards. */
     Con *previously_focused = focused;
-    Con *previously_focused_content = focused->type == CT_WORKSPACE ? focused->parent : NULL;
+    Con *previously_focused_content = focused->type == Con::type::CT_WORKSPACE ? focused->parent : NULL;
     Con *parent = workspace->parent;
     con_detach(workspace);
     con_attach(workspace, parent, false);
@@ -2163,15 +2181,15 @@ void cmd_rename_workspace(I3_CMD, const char *old_name, const char *new_name) {
  * Implementation of 'bar mode dock|hide|invisible|toggle [<bar_id>]'
  *
  */
-void cmd_bar_mode(I3_CMD, const char *bar_mode, const char *bar_id) {
-    int mode = M_DOCK;
+void cmd_bar_mode(Match *current_match, CommandResultIR *cmd_output, const char *bar_mode, const char *bar_id) {
+    auto mode = Barconfig::mode::M_DOCK;
     bool toggle = false;
     if (strcmp(bar_mode, "dock") == 0)
-        mode = M_DOCK;
+        mode = Barconfig::mode::M_DOCK;
     else if (strcmp(bar_mode, "hide") == 0)
-        mode = M_HIDE;
+        mode = Barconfig::mode::M_HIDE;
     else if (strcmp(bar_mode, "invisible") == 0)
-        mode = M_INVISIBLE;
+        mode = Barconfig::mode::M_INVISIBLE;
     else if (strcmp(bar_mode, "toggle") == 0)
         toggle = true;
     else {
@@ -2191,12 +2209,13 @@ void cmd_bar_mode(I3_CMD, const char *bar_mode, const char *bar_id) {
         }
 
         if (toggle) {
-            mode = (current->mode + 1) % 2;
+            // mode = (current->mode + 1) % 2;
+            // FIXME: modes are 3, are we only iterating between M_DOCK and M_HIDE?
         }
 
         DLOG("Changing bar mode of bar_id '%s' from '%d' to '%s (%d)'\n",
              current->id, current->mode, bar_mode, mode);
-        if ((int)current->mode != mode) {
+        if (current->mode != mode) {
             current->mode = mode;
             ipc_send_barconfig_update_event(current);
         }
@@ -2222,13 +2241,13 @@ void cmd_bar_mode(I3_CMD, const char *bar_mode, const char *bar_id) {
  * Implementation of 'bar hidden_state hide|show|toggle [<bar_id>]'
  *
  */
-void cmd_bar_hidden_state(I3_CMD, const char *bar_hidden_state, const char *bar_id) {
-    int hidden_state = S_SHOW;
+void cmd_bar_hidden_state(Match *current_match, CommandResultIR *cmd_output, const char *bar_hidden_state, const char *bar_id) {
+    auto hidden_state = Barconfig::hidden_state::S_SHOW;
     bool toggle = false;
     if (strcmp(bar_hidden_state, "hide") == 0)
-        hidden_state = S_HIDE;
+        hidden_state = Barconfig::hidden_state::S_HIDE;
     else if (strcmp(bar_hidden_state, "show") == 0)
-        hidden_state = S_SHOW;
+        hidden_state = Barconfig::hidden_state::S_SHOW;
     else if (strcmp(bar_hidden_state, "toggle") == 0)
         toggle = true;
     else {
@@ -2248,12 +2267,16 @@ void cmd_bar_hidden_state(I3_CMD, const char *bar_hidden_state, const char *bar_
         }
 
         if (toggle) {
-            hidden_state = (current->hidden_state + 1) % 2;
+            if(current->hidden_state == Barconfig::hidden_state::S_HIDE) {
+                hidden_state = Barconfig::hidden_state::S_SHOW;
+            } else {
+                hidden_state = Barconfig::hidden_state::S_HIDE;
+            }
         }
 
         DLOG("Changing bar hidden_state of bar_id '%s' from '%d' to '%s (%d)'\n",
              current->id, current->hidden_state, bar_hidden_state, hidden_state);
-        if ((int)current->hidden_state != hidden_state) {
+        if (current->hidden_state != hidden_state) {
             current->hidden_state = hidden_state;
             ipc_send_barconfig_update_event(current);
         }
@@ -2279,7 +2302,7 @@ void cmd_bar_hidden_state(I3_CMD, const char *bar_hidden_state, const char *bar_
  * Implementation of 'shmlog <size>|toggle|on|off'
  *
  */
-void cmd_shmlog(I3_CMD, const char *argument) {
+void cmd_shmlog(Match *current_match, CommandResultIR *cmd_output, const char *argument) {
     if (!strcmp(argument, "toggle"))
         /* Toggle shm log, if size is not 0. If it is 0, set it to default. */
         shmlog_size = shmlog_size ? -shmlog_size : default_shmlog_size;
@@ -2311,7 +2334,7 @@ void cmd_shmlog(I3_CMD, const char *argument) {
  * Implementation of 'debuglog toggle|on|off'
  *
  */
-void cmd_debuglog(I3_CMD, const char *argument) {
+void cmd_debuglog(Match *current_match, CommandResultIR *cmd_output, const char *argument) {
     bool logging = get_debug_logging();
     if (!strcmp(argument, "toggle")) {
         LOG("%s debug logging\n", logging ? "Disabling" : "Enabling");

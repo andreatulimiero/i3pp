@@ -140,7 +140,7 @@ char *pango_escape_markup(char *input);
  * kill_nagbar() to kill the bar later on.
  *
  */
-void start_nagbar(pid_t *nagbar_pid, char *argv[]);
+void start_nagbar(pid_t *nagbar_pid, char const *argv[]);
 
 /**
  * Kills the i3-nagbar process, if nagbar_pid != -1.

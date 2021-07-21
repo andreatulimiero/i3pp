@@ -8,7 +8,7 @@ project(
   'cpp',
   version: '4.19.2',
   default_options: [
-    'cpp_std=c++11',
+    'cpp_std=c++14',
     'warning_level=1',  # enable all warnings (-Wall)
     # TODO(https://github.com/i3/i3/issues/4087): switch to
     # 'buildtype=debugoptimized',

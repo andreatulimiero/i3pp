@@ -38,14 +38,17 @@
  */
 
 /* Forward definitions */
-typedef struct Binding Binding;
-typedef struct Rect Rect;
-typedef struct xoutput Output;
-typedef struct Con Con;
-typedef struct Match Match;
-typedef struct Assignment Assignment;
-typedef struct Window i3Window;
-typedef struct mark_t mark_t;
+struct Binding;
+struct Rect;
+struct xoutput;
+struct Con;
+struct Match;
+struct Assignment;
+using Output = struct xoutput;
+namespace i3 {
+struct Window;
+}
+struct mark_t;
 
 /******************************************************************************
  * Helper types
@@ -65,9 +68,10 @@ typedef enum { BS_NORMAL = 0,
 
 /** parameter to specify whether tree_close_internal() and x_window_kill() should kill
  * only this specific window or the whole X11 client */
-typedef enum { DONT_KILL_WINDOW = 0,
-               KILL_WINDOW = 1,
-               KILL_CLIENT = 2 } kill_window_t;
+enum kill_window {
+    DONT_KILL_WINDOW = 0,
+    KILL_WINDOW = 1,
+    KILL_CLIENT = 2 };
 
 /** describes if the window is adjacent to the output (physical screen) edges. */
 typedef enum { ADJ_NONE = 0,
@@ -386,6 +390,7 @@ struct xoutput {
     TAILQ_ENTRY(xoutput) outputs;
 };
 
+namespace i3 {
 /**
  * A 'Window' is a type which contains an xcb_window_t and all the related
  * information (hints like _NET_WM_NAME for that window).
@@ -487,6 +492,7 @@ struct Window {
     /* The window has been swallowed. */
     bool swallowed;
 };
+}
 
 /**
  * A "match" is a data structure which acts like a mask or expression to match
@@ -628,14 +634,15 @@ struct Con {
     surface_t frame_buffer;
     bool pixmap_recreated;
 
-    enum {
+    enum type {
         CT_ROOT = 0,
         CT_OUTPUT = 1,
         CT_CON = 2,
         CT_FLOATING_CON = 3,
         CT_WORKSPACE = 4,
         CT_DOCKAREA = 5
-    } type;
+    };
+    type type;
 
     /** the workspace number, if this Con is of type CT_WORKSPACE and the
      * workspace is not a named workspace (for named workspaces, num == -1) */
@@ -681,7 +688,7 @@ struct Con {
     int border_width;
     int current_border_width;
 
-    struct Window *window;
+    i3::Window *window;
 
     /* timer used for disabling urgency */
     struct ev_timer *urgency_timer;

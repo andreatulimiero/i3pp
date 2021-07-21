@@ -38,7 +38,7 @@ typedef struct tray_output_t {
     TAILQ_ENTRY(tray_output_t) tray_outputs;
 } tray_output_t;
 
-typedef struct config_t {
+struct config_t {
     uint32_t modifier;
     TAILQ_HEAD(bindings_head, binding_t) bindings;
     position_t position;
@@ -64,7 +64,7 @@ typedef struct config_t {
     /* The current hidden_state of the bar, which indicates whether it is hidden or shown */
     enum { S_HIDE = 0,
            S_SHOW = 1 } hidden_state;
-} config_t;
+};
 
 extern config_t config;
 

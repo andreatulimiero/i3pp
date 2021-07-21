@@ -11,6 +11,8 @@
 
 #include <config.hpp>
 
+#include "data.hpp"
+
 /**
  * Returns the output container below the given output container.
  *

@@ -78,14 +78,14 @@ void set_verbosity(bool _verbose);
  * but only if debug logging was activated.
  *
  */
-void debuglog(char *fmt, ...)
+void debuglog(char const *fmt, ...)
     __attribute__((format(printf, 1, 2)));
 
 /**
  * Logs the given message to stdout while prefixing the current time to it.
  *
  */
-void errorlog(char *fmt, ...)
+void errorlog(char const *fmt, ...)
     __attribute__((format(printf, 1, 2)));
 
 /**
@@ -93,7 +93,7 @@ void errorlog(char *fmt, ...)
  * but only if verbose mode is activated.
  *
  */
-void verboselog(char *fmt, ...)
+void verboselog(char const *fmt, ...)
     __attribute__((format(printf, 1, 2)));
 
 /**

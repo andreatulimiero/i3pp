@@ -7,6 +7,7 @@
  * bindings.c: Functions for configuring, finding and, running bindings.
  */
 #include "all.hpp"
+#include "data.hpp"
 #include "memory.hpp"
 
 #include <math.h>
@@ -209,8 +210,8 @@ static Binding *get_binding(i3_event_state_mask_t state_filtered, bool is_releas
         TAILQ_FOREACH (bind, bindings, bindings) {
             if (bind->input_type != input_type)
                 continue;
-            if (bind->release == B_UPON_KEYRELEASE_IGNORE_MODS)
-                bind->release = B_UPON_KEYRELEASE;
+            if (bind->release == Binding::B_UPON_KEYRELEASE_IGNORE_MODS)
+                bind->release = Binding::B_UPON_KEYRELEASE;
         }
     }
 
@@ -241,7 +242,7 @@ static Binding *get_binding(i3_event_state_mask_t state_filtered, bool is_releas
                 DLOG("binding_keycode->modifiers = %d, modifiers_mask = %d, modifiers_state = %d, mods_match = %s\n",
                      binding_keycode->modifiers, modifiers_mask, modifiers_state, (mods_match ? "yes" : "no"));
                 if (binding_keycode->keycode == input_keycode &&
-                    (mods_match || (bind->release == B_UPON_KEYRELEASE_IGNORE_MODS && is_release))) {
+                    (mods_match || (bind->release == Binding::B_UPON_KEYRELEASE_IGNORE_MODS && is_release))) {
                     found_keycode = true;
                     break;
                 }
@@ -258,7 +259,7 @@ static Binding *get_binding(i3_event_state_mask_t state_filtered, bool is_releas
                 const bool mods_match = (modifiers_mask == modifiers_state);
                 DLOG("binding_keycode->modifiers = %d, modifiers_mask = %d, modifiers_state = %d, mods_match = %s\n",
                      binding_keycode->modifiers, modifiers_mask, modifiers_state, (mods_match ? "yes" : "no"));
-                if (mods_match || (bind->release == B_UPON_KEYRELEASE_IGNORE_MODS && is_release)) {
+                if (mods_match || (bind->release == Binding::B_UPON_KEYRELEASE_IGNORE_MODS && is_release)) {
                     found_keycode = true;
                     break;
                 }
@@ -272,8 +273,8 @@ static Binding *get_binding(i3_event_state_mask_t state_filtered, bool is_releas
          * user pressed. We therefore mark it as B_UPON_KEYRELEASE_IGNORE_MODS
          * for later, so that the user can release the modifiers before the
          * actual key or button and the release event will still be matched. */
-        if (bind->release == B_UPON_KEYRELEASE && !is_release) {
-            bind->release = B_UPON_KEYRELEASE_IGNORE_MODS;
+        if (bind->release == Binding::B_UPON_KEYRELEASE && !is_release) {
+            bind->release = Binding::B_UPON_KEYRELEASE_IGNORE_MODS;
             DLOG("marked bind %p as B_UPON_KEYRELEASE_IGNORE_MODS\n", bind);
             if (result) {
                 break;
@@ -282,7 +283,7 @@ static Binding *get_binding(i3_event_state_mask_t state_filtered, bool is_releas
         }
 
         /* Check if the binding is for a press or a release event */
-        if ((bind->release == B_UPON_KEYPRESS && is_release)) {
+        if ((bind->release == Binding::B_UPON_KEYPRESS && is_release)) {
             continue;
         }
 
@@ -365,13 +366,14 @@ struct resolve {
     struct xkb_state *xkb_state_numlock_no_shift;
 };
 
-#define ADD_TRANSLATED_KEY(code, mods)                                                     \
-    do {                                                                                   \
-        struct Binding_Keycode *binding_keycode = smalloc(sizeof(struct Binding_Keycode)); \
-        binding_keycode->modifiers = (mods);                                               \
-        binding_keycode->keycode = (code);                                                 \
-        TAILQ_INSERT_TAIL(&(bind->keycodes_head), binding_keycode, keycodes);              \
-    } while (0)
+namespace {
+void add_translated_key(xkb_keycode_t code, Binding* bind, i3_event_state_mask_t mods) {
+    auto binding_keycode = create_struct<Binding_Keycode>();
+    binding_keycode->modifiers = mods;                                              
+    binding_keycode->keycode = code;                                                
+    TAILQ_INSERT_TAIL(&(bind->keycodes_head), binding_keycode, keycodes);             
+}
+}
 
 /*
  * add_keycode_if_matches is called for each keycode in the keymap and will add
@@ -380,7 +382,7 @@ struct resolve {
  *
  */
 static void add_keycode_if_matches(struct xkb_keymap *keymap, xkb_keycode_t key, void *data) {
-    const struct resolve *resolving = data;
+    auto const resolving = static_cast<struct resolve*>(data);
     struct xkb_state *numlock_state = resolving->xkb_state_numlock;
     xkb_keysym_t sym = xkb_state_key_get_one_sym(resolving->xkb_state, key);
     if (sym != resolving->keysym) {
@@ -402,10 +404,10 @@ static void add_keycode_if_matches(struct xkb_keymap *keymap, xkb_keycode_t key,
     }
     Binding *bind = resolving->bind;
 
-    ADD_TRANSLATED_KEY(key, bind->event_state_mask);
+    add_translated_key(key, bind, bind->event_state_mask);
 
     /* Also bind the key with active CapsLock */
-    ADD_TRANSLATED_KEY(key, bind->event_state_mask | XCB_MOD_MASK_LOCK);
+    add_translated_key(key, bind, bind->event_state_mask | XCB_MOD_MASK_LOCK);
 
     /* If this binding is not explicitly for NumLock, check whether we need to
      * add a fallback. */
@@ -417,10 +419,10 @@ static void add_keycode_if_matches(struct xkb_keymap *keymap, xkb_keycode_t key,
         xkb_keysym_t sym_numlock = xkb_state_key_get_one_sym(numlock_state, key);
         if (sym_numlock == resolving->keysym) {
             /* Also bind the key with active NumLock */
-            ADD_TRANSLATED_KEY(key, bind->event_state_mask | xcb_numlock_mask);
+            add_translated_key(key, bind, bind->event_state_mask | xcb_numlock_mask);
 
             /* Also bind the key with active NumLock+CapsLock */
-            ADD_TRANSLATED_KEY(key, bind->event_state_mask | xcb_numlock_mask | XCB_MOD_MASK_LOCK);
+            add_translated_key(key, bind, bind->event_state_mask | xcb_numlock_mask | XCB_MOD_MASK_LOCK);
         } else {
             DLOG("Skipping automatic numlock fallback, key %d resolves to 0x%x with numlock\n",
                  key, sym_numlock);
@@ -520,10 +522,10 @@ void translate_keysyms(void) {
                 FREE(first);
             }
 
-            ADD_TRANSLATED_KEY(bind->keycode, bind->event_state_mask);
+            add_translated_key(bind->keycode, bind, bind->event_state_mask);
 
             /* Also bind the key with active CapsLock */
-            ADD_TRANSLATED_KEY(bind->keycode, bind->event_state_mask | XCB_MOD_MASK_LOCK);
+            add_translated_key(bind->keycode, bind, bind->event_state_mask | XCB_MOD_MASK_LOCK);
 
             /* If this binding is not explicitly for NumLock, check whether we need to
              * add a fallback. */
@@ -536,10 +538,10 @@ void translate_keysyms(void) {
                 xkb_keysym_t sym_numlock = xkb_state_key_get_one_sym(dummy_state_numlock, bind->keycode);
                 if (sym == sym_numlock) {
                     /* Also bind the key with active NumLock */
-                    ADD_TRANSLATED_KEY(bind->keycode, bind->event_state_mask | xcb_numlock_mask);
+                    add_translated_key(bind->keycode, bind, bind->event_state_mask | xcb_numlock_mask);
 
                     /* Also bind the key with active NumLock+CapsLock */
-                    ADD_TRANSLATED_KEY(bind->keycode, bind->event_state_mask | xcb_numlock_mask | XCB_MOD_MASK_LOCK);
+                    add_translated_key(bind->keycode, bind, bind->event_state_mask | xcb_numlock_mask | XCB_MOD_MASK_LOCK);
                 } else {
                     DLOG("Skipping automatic numlock fallback, key %d resolves to 0x%x with numlock\n",
                          bind->keycode, sym_numlock);
@@ -612,8 +614,6 @@ out:
     }
 }
 
-#undef ADD_TRANSLATED_KEY
-
 /*
  * Switches the key bindings to the given mode, if the mode exists
  *
@@ -637,8 +637,8 @@ void switch_mode(const char *new_mode) {
          * activating one of them. */
         Binding *bind;
         TAILQ_FOREACH (bind, bindings, bindings) {
-            if (bind->release == B_UPON_KEYRELEASE_IGNORE_MODS)
-                bind->release = B_UPON_KEYRELEASE;
+            if (bind->release == Binding::B_UPON_KEYRELEASE_IGNORE_MODS)
+                bind->release = Binding::B_UPON_KEYRELEASE;
         }
 
         char *event_msg;
@@ -673,7 +673,7 @@ static void reorder_bindings_of_mode(struct Mode *mode) {
     TAILQ_FOREACH (current, mode->bindings, bindings) {
         n++;
     }
-    Binding **tmp = scalloc(n, sizeof(Binding *));
+    auto tmp = static_cast<Binding**>(scalloc(n, sizeof(Binding *)));
     n = 0;
     TAILQ_FOREACH (current, mode->bindings, bindings) {
         tmp[n++] = current;
@@ -681,7 +681,7 @@ static void reorder_bindings_of_mode(struct Mode *mode) {
 
     qsort(tmp, n, sizeof(Binding *), reorder_binding_cmp);
 
-    struct bindings_head *reordered = scalloc(1, sizeof(struct bindings_head));
+    auto reordered = create_struct<struct bindings_head>();
     TAILQ_INIT(reordered);
     for (int i = 0; i < n; i++) {
         current = tmp[i];
@@ -789,7 +789,7 @@ void check_for_duplicate_bindings(struct context *context) {
  * Creates a dynamically allocated copy of bind.
  */
 static Binding *binding_copy(Binding *bind) {
-    Binding *ret = smalloc(sizeof(Binding));
+    auto ret = create_struct<Binding>();
     *ret = *bind;
     if (bind->symbol != NULL)
         ret->symbol = sstrdup(bind->symbol);
@@ -798,7 +798,7 @@ static Binding *binding_copy(Binding *bind) {
     TAILQ_INIT(&(ret->keycodes_head));
     struct Binding_Keycode *binding_keycode;
     TAILQ_FOREACH (binding_keycode, &(bind->keycodes_head), keycodes) {
-        struct Binding_Keycode *ret_binding_keycode = smalloc(sizeof(struct Binding_Keycode));
+        auto ret_binding_keycode = create_struct<Binding_Keycode>();
         *ret_binding_keycode = *binding_keycode;
         TAILQ_INSERT_TAIL(&(ret->keycodes_head), ret_binding_keycode, keycodes);
     }
@@ -853,7 +853,7 @@ CommandResult *run_binding(Binding *bind, Con *con) {
     if (result->parse_error) {
         char *pageraction;
         sasprintf(&pageraction, "i3-sensible-pager \"%s\"\n", errorfilename);
-        char *argv[] = {
+        char const *argv[] = {
             NULL, /* will be replaced by the executable path */
             "-f",
             config.font.pattern,
@@ -950,7 +950,7 @@ static int fill_rmlvo_from_root(struct xkb_rule_names *xkb_names) {
  */
 bool load_keymap(void) {
     if (xkb_context == NULL) {
-        if ((xkb_context = xkb_context_new(0)) == NULL) {
+        if ((xkb_context = xkb_context_new(xkb_context_flags::XKB_CONTEXT_NO_FLAGS)) == NULL) {
             ELOG("Could not create xkbcommon context\n");
             return false;
         }
@@ -959,7 +959,7 @@ bool load_keymap(void) {
     struct xkb_keymap *new_keymap = NULL;
     int32_t device_id;
     if (xkb_supported && (device_id = xkb_x11_get_core_keyboard_device_id(conn)) > -1) {
-        if ((new_keymap = xkb_x11_keymap_new_from_device(xkb_context, conn, device_id, 0)) == NULL) {
+        if ((new_keymap = xkb_x11_keymap_new_from_device(xkb_context, conn, device_id, xkb_keymap_compile_flags::XKB_KEYMAP_COMPILE_NO_FLAGS)) == NULL) {
             ELOG("xkb_x11_keymap_new_from_device failed\n");
             return false;
         }
@@ -977,7 +977,7 @@ bool load_keymap(void) {
             ELOG("Could not get _XKB_RULES_NAMES atom from root window, falling back to defaults.\n");
             /* Using NULL for the fields of xkb_rule_names. */
         }
-        new_keymap = xkb_keymap_new_from_names(xkb_context, &names, 0);
+        new_keymap = xkb_keymap_new_from_names(xkb_context, &names, xkb_keymap_compile_flags::XKB_KEYMAP_COMPILE_NO_FLAGS);
         free((char *)names.rules);
         free((char *)names.model);
         free((char *)names.layout);

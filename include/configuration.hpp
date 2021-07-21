@@ -14,13 +14,10 @@
 
 #include "queue.hpp"
 #include "i3.hpp"
+#include "libi3.hpp"
 
-typedef struct IncludedFile IncludedFile;
-typedef struct Config Config;
-typedef struct Barconfig Barconfig;
 extern char *current_configpath;
 extern char *current_config;
-extern Config config;
 extern SLIST_HEAD(modes_head, Mode) modes;
 extern TAILQ_HEAD(barconfig_head, Barconfig) barconfigs;
 extern TAILQ_HEAD(includedfiles_head, IncludedFile) included_files;
@@ -262,6 +259,7 @@ struct Config {
     /* The number of currently parsed barconfigs */
     int number_barconfigs;
 };
+extern Config config;
 
 /**
  * Holds the status bar configuration (i3bar). One of these structures is
@@ -293,13 +291,19 @@ struct Barconfig {
     char *socket_path;
 
     /** Bar display mode (hide unless modifier is pressed or show in dock mode or always hide in invisible mode) */
-    enum { M_DOCK = 0,
-           M_HIDE = 1,
-           M_INVISIBLE = 2 } mode;
+    enum mode {
+        M_DOCK = 0,
+        M_HIDE = 1,
+        M_INVISIBLE = 2
+    };
+    mode mode;
 
     /* The current hidden_state of the bar, which indicates whether it is hidden or shown */
-    enum { S_HIDE = 0,
-           S_SHOW = 1 } hidden_state;
+    enum hidden_state {
+        S_HIDE = 0,
+        S_SHOW = 1
+    };
+    hidden_state hidden_state;
 
     /** Bar modifier (to show bar when in hide mode). */
     uint32_t modifier;
